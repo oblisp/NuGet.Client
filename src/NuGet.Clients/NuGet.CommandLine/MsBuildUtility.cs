@@ -10,7 +10,7 @@ using System.Linq;
 using System.Reflection;
 using System.Text;
 using System.Text.RegularExpressions;
-using NuGet.Commands;
+using System.Threading.Tasks;
 using NuGet.Common;
 using NuGet.ProjectModel;
 
@@ -166,29 +166,33 @@ namespace NuGet.CommandLine
 
                 using (var process = Process.Start(processStartInfo))
                 {
-                    var finished = process.WaitForExit(timeOut);
-
-                    if (!finished)
+                    var errors = new StringBuilder();
+                    using (var errorTask = ConsumeStreamReaderAsync(process.StandardError, errors))
                     {
-                        try
+                        var finished = process.WaitForExit(timeOut);
+                        if (!finished)
                         {
-                            process.Kill();
-                        }
-                        catch (Exception ex)
-                        {
+                            try
+                            {
+                                process.Kill();
+                            }
+                            catch (Exception ex)
+                            {
+                                throw new CommandLineException(
+                                    LocalizedResourceManager.GetString(nameof(NuGetResources.Error_CannotKillMsBuild)) + " : " +
+                                    ex.Message,
+                                    ex);
+                            }
+
                             throw new CommandLineException(
-                                LocalizedResourceManager.GetString(nameof(NuGetResources.Error_CannotKillMsBuild)) + " : " +
-                                ex.Message,
-                                ex);
+                                LocalizedResourceManager.GetString(nameof(NuGetResources.Error_MsBuildTimedOut)));
                         }
 
-                        throw new CommandLineException(
-                            LocalizedResourceManager.GetString(nameof(NuGetResources.Error_MsBuildTimedOut)));
-                    }
-
-                    if (process.ExitCode != 0)
-                    {
-                        throw new CommandLineException(process.StandardError.ReadToEnd());
+                        if (process.ExitCode != 0)
+                        {
+                            errorTask.Wait();
+                            throw new CommandLineException(errors.ToString());
+                        }
                     }
                 }
 
@@ -205,6 +209,17 @@ namespace NuGet.CommandLine
                 }
 
                 return spec;
+            }
+        }
+
+        private static async Task ConsumeStreamReaderAsync(StreamReader reader, StringBuilder lines)
+        {
+            await Task.Yield();
+
+            string line;
+            while ((line = await reader.ReadLineAsync()) != null)
+            {
+                lines.AppendLine(line);
             }
         }
 
@@ -501,7 +516,6 @@ namespace NuGet.CommandLine
                    throwOnError: true);
                 var projectCollection = Activator.CreateInstance(projectCollectionType) as IDisposable;
 
-
                 using (projectCollection)
                 {
                     var installed = ((dynamic)projectCollection).Toolsets;
@@ -749,7 +763,6 @@ namespace NuGet.CommandLine
             {
                 return Path.Combine(msbuildDirectory, "msbuild.exe");
             }
-
         }
 
         /// <summary>

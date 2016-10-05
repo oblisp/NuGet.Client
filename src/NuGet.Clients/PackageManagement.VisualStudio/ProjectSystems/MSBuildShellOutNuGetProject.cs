@@ -544,29 +544,36 @@ namespace NuGet.PackageManagement.VisualStudio
 
                     using (var process = Process.Start(processStartInfo))
                     {
-                        var finished = process.WaitForExit(timeOut);
-
-                        if (!finished)
+                        var errors = new StringBuilder();
+                        var output = new StringBuilder();
+                        using (var outputTask = ConsumeStreamReaderAsync(process.StandardOutput, output))
+                        using (var errorTask = ConsumeStreamReaderAsync(process.StandardError, errors))
                         {
-                            try
+                            var finished = process.WaitForExit(timeOut);
+
+                            if (!finished)
                             {
-                                process.Kill();
-                            }
-                            catch (Exception ex)
-                            {
-                                throw new InvalidOperationException("msbuild.exe could not be killed.", ex);
+                                try
+                                {
+                                    process.Kill();
+                                }
+                                catch (Exception ex)
+                                {
+                                    throw new InvalidOperationException("msbuild.exe could not be killed.", ex);
+                                }
+
+                                throw new InvalidOperationException("msbuild.exe timed out.");
                             }
 
-                            throw new InvalidOperationException("msbuild.exe timed out.");
-                        }
-
-                        if (process.ExitCode != 0)
-                        {
-                            throw new InvalidOperationException(
-                                "msbuild.exe failed. STDOUT:" + Environment.NewLine +
-                                process.StandardOutput.ReadToEnd() + Environment.NewLine +
-                                "STDERR:" + Environment.NewLine +
-                                process.StandardError.ReadToEnd());
+                            if (process.ExitCode != 0)
+                            {
+                                System.Threading.Tasks.Task.WaitAll(outputTask, errorTask);
+                                throw new InvalidOperationException(
+                                    "msbuild.exe failed. STDOUT:" + Environment.NewLine +
+                                    output.ToString() + Environment.NewLine +
+                                    "STDERR:" + Environment.NewLine +
+                                    errors.ToString());
+                            }
                         }
                     }
 
@@ -583,6 +590,17 @@ namespace NuGet.PackageManagement.VisualStudio
                     }
 
                     return spec;
+                }
+            }
+
+            private static async System.Threading.Tasks.Task ConsumeStreamReaderAsync(StreamReader reader, StringBuilder lines)
+            {
+                await System.Threading.Tasks.Task.Yield();
+
+                string line;
+                while ((line = await reader.ReadLineAsync()) != null)
+                {
+                    lines.AppendLine(line);
                 }
             }
 
