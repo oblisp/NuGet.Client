@@ -11,7 +11,17 @@ namespace NuGet.PackageManagement.VisualStudio
     {
         protected static readonly AsyncLocal<RestoreOperationProgressUI> _instance = new AsyncLocal<RestoreOperationProgressUI>();
 
-        public static RestoreOperationProgressUI Current => _instance.Value;
+        public static RestoreOperationProgressUI Current
+        {
+            get
+            {
+                return _instance.Value;
+            }
+            set
+            {
+                _instance.Value = value;
+            }
+        }
 
         public CancellationToken UserCancellationToken { get; protected set; } = CancellationToken.None;
 

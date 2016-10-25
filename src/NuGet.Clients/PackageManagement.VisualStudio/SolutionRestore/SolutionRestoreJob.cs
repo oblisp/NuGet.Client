@@ -388,7 +388,7 @@ namespace NuGet.PackageManagement.VisualStudio
                 // If Canceled is not already set to true
                 _hasErrors = true;
                 _status = NuGetOperationStatus.Failed;
-                ThreadHelper.JoinableTaskFactory.RunAsync(async delegate
+                ThreadHelper.JoinableTaskFactory.Run(async delegate
                 {
                     // Switch to main thread to update the error list window or output window
                     await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
@@ -434,7 +434,7 @@ namespace NuGet.PackageManagement.VisualStudio
                 if (packages.Count == 0)
                 {
                     if (!isSolutionAvailable
-                        && GetProjectFolderPath().Any(p => CheckPackagesConfig(p.ProjectPath, p.ProjectName)))
+                        && GetProjectInfoAsync().Any(p => CheckPackagesConfig(p.ProjectPath, p.ProjectName)))
                     {
                         _logger.ShowError(Strings.SolutionIsNotSaved);
                         _logger.WriteLine(VerbosityLevel.Quiet, Strings.SolutionIsNotSaved);
@@ -481,8 +481,6 @@ namespace NuGet.PackageManagement.VisualStudio
 
         private async Task RunWithProgressAsync(Func<RestoreOperationProgressUI,Task> asyncMethod)
         {
-            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-
             using (var session = await _logger.StartProgressSessionAsync(Token))
             using (var ctr = session.RegisterUserCancellationAction(() => _jobCts.Cancel()))
             {
@@ -581,12 +579,18 @@ namespace NuGet.PackageManagement.VisualStudio
             }
         }
 
-        private IEnumerable<ProjectInfo> GetProjectFolderPath()
+        private async Task<IEnumerable<ProjectInfo>> GetProjectInfoAsync()
         {
-            var projects = _dte.Solution.Projects;
-            return projects
-                .OfType<EnvDTE.Project>()
-                .Select(p => new ProjectInfo(EnvDTEProjectUtility.GetFullPath(p), p.Name));
+            return await ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+            {
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+                var projects = _dte.Solution.Projects;
+                return projects
+                    .OfType<EnvDTE.Project>()
+                    .Select(p => new ProjectInfo(EnvDTEProjectUtility.GetFullPath(p), p.Name))
+                    .ToList();
+            });
         }
 
         private bool CheckPackagesConfig(string folderPath, string projectName)

@@ -256,7 +256,7 @@ namespace NuGet.PackageManagement.VisualStudio
         /// </remarks>
         private static int GetMSBuildOutputVerbositySetting(IServiceProvider serviceProvider)
         {
-            return ThreadHelper.JoinableTaskFactory.Run<int>(async delegate
+            return ThreadHelper.JoinableTaskFactory.Run(async delegate
             {
                 // Switch to main thread to use DTE
                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
@@ -285,31 +285,41 @@ namespace NuGet.PackageManagement.VisualStudio
                 UserCancellationToken = _session.UserCancellationToken;
             }
 
-            public static Task<RestoreOperationProgressUI> StartAsync(IServiceProvider serviceProvider, CancellationToken token)
+            public static async Task<RestoreOperationProgressUI> StartAsync(IServiceProvider serviceProvider, CancellationToken token)
             {
-                var waitDialogFactory = serviceProvider.GetService<
-                    SVsThreadedWaitDialogFactory, IVsThreadedWaitDialogFactory>();
+                var progress = await ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+                {
+                    await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
-                var session = waitDialogFactory.StartWaitDialog(
-                    waitCaption: Strings.DialogTitle,
-                    initialProgress: new ThreadedWaitDialogProgressData(
-                        Strings.RestoringPackages,
-                        progressText: string.Empty,
-                        statusBarText: string.Empty,
-                        isCancelable: true,
-                        currentStep: 0,
-                        totalSteps: 0));
+                    var waitDialogFactory = serviceProvider.GetService<
+                        SVsThreadedWaitDialogFactory, IVsThreadedWaitDialogFactory>();
 
-                RestoreOperationProgressUI progress = new WaitDialogProgress(session);
-                _instance.Value = progress;
+                    var session = waitDialogFactory.StartWaitDialog(
+                        waitCaption: Strings.DialogTitle,
+                        initialProgress: new ThreadedWaitDialogProgressData(
+                            Strings.RestoringPackages,
+                            progressText: string.Empty,
+                            statusBarText: string.Empty,
+                            isCancelable: true,
+                            currentStep: 0,
+                            totalSteps: 0));
 
-                return Task.FromResult(progress);
+                    return new WaitDialogProgress(session);
+                });
+
+                Current = progress;
+                return progress;
             }
 
             public override void Dispose()
             {
-                _instance.Value = null;
-                _session.Dispose();
+                Current = null;
+
+                ThreadHelper.JoinableTaskFactory.Run(async () =>
+                {
+                    await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                    _session.Dispose();
+                });
             }
 
             public override async Task ReportProgressAsync(
@@ -317,18 +327,21 @@ namespace NuGet.PackageManagement.VisualStudio
                 uint currentStep,
                 uint totalSteps)
             {
-                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                await ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+                {
+                    await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
-                // When both currentStep and totalSteps are 0, we get a marquee on the dialog
-                var progressData = new ThreadedWaitDialogProgressData(
-                    progressMessage,
-                    progressText: string.Empty,
-                    statusBarText: string.Empty,
-                    isCancelable: true,
-                    currentStep: (int)currentStep,
-                    totalSteps: (int)totalSteps);
+                    // When both currentStep and totalSteps are 0, we get a marquee on the dialog
+                    var progressData = new ThreadedWaitDialogProgressData(
+                        progressMessage,
+                        progressText: string.Empty,
+                        statusBarText: string.Empty,
+                        isCancelable: true,
+                        currentStep: (int)currentStep,
+                        totalSteps: (int)totalSteps);
 
-                _session.Progress.Report(progressData);
+                    _session.Progress.Report(progressData);
+                });
             }
         }
 
@@ -347,33 +360,46 @@ namespace NuGet.PackageManagement.VisualStudio
                 IServiceProvider serviceProvider,
                 CancellationToken token)
             {
-                var StatusBar = serviceProvider.GetService<SVsStatusbar, IVsStatusbar>();
-
-                // Make sure the status bar is not frozen
-                int frozen;
-                StatusBar.IsFrozen(out frozen);
-
-                if (frozen != 0)
+                var instance = await ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
                 {
-                    StatusBar.FreezeOutput(0);
-                }
+                    await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
-                StatusBar.Animation(1, ref icon);
+                    var StatusBar = serviceProvider.GetService<SVsStatusbar, IVsStatusbar>();
 
-                RestoreOperationProgressUI progress = new StatusBarProgress(StatusBar);
-                await progress.ReportProgressAsync(Strings.RestoringPackages);
+                    // Make sure the status bar is not frozen
+                    int frozen;
+                    StatusBar.IsFrozen(out frozen);
 
-                return _instance.Value = progress;
+                    if (frozen != 0)
+                    {
+                        StatusBar.FreezeOutput(0);
+                    }
+
+                    StatusBar.Animation(1, ref icon);
+
+                    RestoreOperationProgressUI progress = new StatusBarProgress(StatusBar);
+                    await progress.ReportProgressAsync(Strings.RestoringPackages);
+
+                    return progress;
+                });
+
+                Current = instance;
+                return instance;
             }
 
             public override void Dispose()
             {
-                _instance.Value = null;
+                Current = null;
 
-                StatusBar.Animation(0, ref icon);
-                StatusBar.Progress(ref cookie, 0, "", 0, 0);
-                StatusBar.FreezeOutput(0);
-                StatusBar.Clear();
+                ThreadHelper.JoinableTaskFactory.Run(async () =>
+                {
+                    await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+                    StatusBar.Animation(0, ref icon);
+                    StatusBar.Progress(ref cookie, 0, "", 0, 0);
+                    StatusBar.FreezeOutput(0);
+                    StatusBar.Clear();
+                });
             }
 
             public override async Task ReportProgressAsync(
@@ -381,19 +407,22 @@ namespace NuGet.PackageManagement.VisualStudio
                 uint currentStep,
                 uint totalSteps)
             {
-                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-
-                // Make sure the status bar is not frozen
-                int frozen;
-                StatusBar.IsFrozen(out frozen);
-
-                if (frozen != 0)
+                await ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
                 {
-                    StatusBar.FreezeOutput(0);
-                }
+                    await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
-                StatusBar.SetText(progressMessage);
-                StatusBar.Progress(ref cookie, 1, "", currentStep, totalSteps);
+                    // Make sure the status bar is not frozen
+                    int frozen;
+                    StatusBar.IsFrozen(out frozen);
+
+                    if (frozen != 0)
+                    {
+                        StatusBar.FreezeOutput(0);
+                    }
+
+                    StatusBar.SetText(progressMessage);
+                    StatusBar.Progress(ref cookie, 1, "", currentStep, totalSteps);
+                });
             }
         }
     }

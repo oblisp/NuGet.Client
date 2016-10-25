@@ -17,11 +17,12 @@ namespace NuGet.SolutionRestoreManager
         /// Base intermediate path of the project.
         /// </summary>
         string BaseIntermediatePath { get; }
-
+#if false
         /// <summary>
         /// Original raw value of TargetFrameworks property as set in a project file.
         /// </summary>
         string OriginalTargetFrameworks { get; }
+#endif
 
         /// <summary>
         /// Target frameworks metadata.
