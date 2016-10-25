@@ -40,7 +40,7 @@ namespace NuGet.PackageManagement.VisualStudio
         private string _projectName;
         private string _projectUniqueName;
         private string _projectFullPath;
-        private readonly String _projectId;
+        private bool _callerIsUnitTest;
 
         static LegacyCSProjPackageReferenceProject()
         {
@@ -52,25 +52,19 @@ namespace NuGet.PackageManagement.VisualStudio
 
         public LegacyCSProjPackageReferenceProject(
             IEnvDTEProjectAdapter project,
-            string projectId)
+            string projectId,
+            bool callerIsUnitTest = false)
         {
-            ThreadHelper.ThrowIfNotOnUIThread();
-
-            if (project == null)
-            {
-                throw new ArgumentNullException(nameof(project));
-            }
-
-            _project = project;
+            _project = project ?? throw new ArgumentNullException(nameof(project));
             _projectName = _project.Name;
             _projectUniqueName = _project.UniqueName;
             _projectFullPath = _project.ProjectFullPath;
-            _projectId = projectId;
+            _callerIsUnitTest = callerIsUnitTest;
 
             InternalMetadata.Add(NuGetProjectMetadataKeys.Name, _projectName);
             InternalMetadata.Add(NuGetProjectMetadataKeys.UniqueName, _projectUniqueName);
             InternalMetadata.Add(NuGetProjectMetadataKeys.FullPath, _projectFullPath);
-            InternalMetadata.Add(NuGetProjectMetadataKeys.ProjectId, _projectId);
+            InternalMetadata.Add(NuGetProjectMetadataKeys.ProjectId, projectId);
         }
 
         public override string ProjectName => _projectName;
@@ -146,8 +140,8 @@ namespace NuGet.PackageManagement.VisualStudio
                 _project.AddOrUpdateLegacyCSProjPackage(
                     packageIdentity.Id,
                     packageIdentity.Version.ToNormalizedString(),
-                    new string[] { },
-                    new string[] { });
+                    metadataElements: new string[] { },
+                    metadataValues: new string[] { });
 
                 success = true;
             });
@@ -174,27 +168,18 @@ namespace NuGet.PackageManagement.VisualStudio
 
         private async Task<string> GetBaseIntermediatePathAsync()
         {
-            string baseIntermediatePath = String.Empty;
-
-            await ThreadHelper.JoinableTaskFactory.RunAsync(async delegate
-            {
-                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-
-                baseIntermediatePath = GetBaseIntermediatePath();
-            });
-
-            return baseIntermediatePath;
+            return await RunOnUIThread(GetBaseIntermediatePath);
         }
 
         private string GetBaseIntermediatePath()
         {
-            ThreadHelper.ThrowIfNotOnUIThread();
+            EnsureUIThread();
 
-            var baseIntermediatePath = _project.BaseIntermediatePath;
+            var baseIntermediatePath = _project.BaseIntermediateOutputPath;
 
             if (string.IsNullOrEmpty(baseIntermediatePath) || !Directory.Exists(baseIntermediatePath))
             {
-                throw new InvalidDataException(nameof(_project.BaseIntermediatePath));
+                throw new InvalidDataException(nameof(_project.BaseIntermediateOutputPath));
             }
 
             return baseIntermediatePath;
@@ -246,20 +231,12 @@ namespace NuGet.PackageManagement.VisualStudio
 
         private async Task<PackageSpec> GetPackageSpecAsync()
         {
-            PackageSpec packageSpec = null;
-            await ThreadHelper.JoinableTaskFactory.RunAsync(async delegate
-            {
-                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-
-                packageSpec = GetPackageSpec();
-            });
-
-            return packageSpec;
+            return await RunOnUIThread(GetPackageSpec);
         }
 
         private PackageSpec GetPackageSpec()
         {
-            ThreadHelper.ThrowIfNotOnUIThread();
+            EnsureUIThread();
 
             var projectReferences = _project.GetLegacyCSProjProjectReferences(_desiredPackageReferenceMetadata)
                 .Select(ToProjectRestoreReference);
@@ -267,10 +244,15 @@ namespace NuGet.PackageManagement.VisualStudio
             var packageReferences = _project.GetLegacyCSProjPackageReferences(_desiredPackageReferenceMetadata)
                 .Select(ToPackageLibraryDependency);
 
+            var packageTargetFallback = _project.PackageTargetFallback?.Split(new[] { ';' })
+                .Select(NuGetFramework.Parse)
+                .ToList();
+
             var projectTfi = new TargetFrameworkInformation()
             {
                 FrameworkName = _project.TargetNuGetFramework,
-                Dependencies = packageReferences.ToList()
+                Dependencies = packageReferences.ToList(),
+                Imports = packageTargetFallback
             };
 
             // Build up runtime information.
@@ -392,6 +374,32 @@ namespace NuGet.PackageManagement.VisualStudio
             }
 
             return string.Empty;
+        }
+
+        private async Task<T> RunOnUIThread<T>(Func<T> uiThreadFunction)
+        {
+            if (_callerIsUnitTest)
+            {
+                return uiThreadFunction();
+            }
+
+            T result = default(T);
+            await ThreadHelper.JoinableTaskFactory.RunAsync(async delegate
+            {
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+                result = uiThreadFunction();
+            });
+
+            return result;
+        }
+
+        private void EnsureUIThread()
+        {
+            if (!_callerIsUnitTest)
+            {
+                ThreadHelper.ThrowIfNotOnUIThread();
+            }
         }
     }
 }
