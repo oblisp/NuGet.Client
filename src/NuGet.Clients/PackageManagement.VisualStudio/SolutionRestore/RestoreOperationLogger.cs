@@ -24,23 +24,37 @@ namespace NuGet.PackageManagement.VisualStudio
 
         private readonly IServiceProvider _serviceProvider;
         private readonly ErrorListProvider _errorListProvider;
-        private readonly Lazy<EnvDTE.OutputWindowPane> _buildOutputPane;
+        private readonly EnvDTE.OutputWindowPane _outputWindowPane;
         private readonly Func<CancellationToken, Task<RestoreOperationProgressUI>> _progressFactory;
 
         private bool _cancelled;
 
         // The value of the "MSBuild project build output verbosity" setting
         // of VS. From 0 (quiet) to 4 (Diagnostic).
-        private readonly Lazy<int> _msbuildOutputVerbosity;
-
-        public int OutputVerbosity => _msbuildOutputVerbosity.Value;
+        public int OutputVerbosity { get; }
 
         public void SetCancelled() => _cancelled = true;
 
-        public RestoreOperationLogger(
+        private RestoreOperationLogger(
             IServiceProvider serviceProvider,
             ErrorListProvider errorListProvider,
-            bool blockingUi)
+            EnvDTE.OutputWindowPane outputWindowPane,
+            Func<CancellationToken, Task<RestoreOperationProgressUI>> progressFactory,
+            int outputVerbosity)
+        {
+            _serviceProvider = serviceProvider;
+            _errorListProvider = errorListProvider;
+            _progressFactory = progressFactory;
+            _outputWindowPane = outputWindowPane;
+
+            OutputVerbosity = outputVerbosity;
+        }
+
+        public static async Task<RestoreOperationLogger> StartAsync(
+            IServiceProvider serviceProvider,
+            ErrorListProvider errorListProvider,
+            bool blockingUi,
+            CancellationToken token)
         {
             if (serviceProvider == null)
             {
@@ -52,23 +66,32 @@ namespace NuGet.PackageManagement.VisualStudio
                 throw new ArgumentNullException(nameof(errorListProvider));
             }
 
-            _serviceProvider = serviceProvider;
-            _errorListProvider = errorListProvider;
+            var msbuildOutputVerbosity = await GetMSBuildOutputVerbositySettingAsync(serviceProvider);
 
+            var buildOutputPane =await GetBuildOutputPaneAsync(serviceProvider);
+
+            Func<CancellationToken, Task<RestoreOperationProgressUI>> progressFactory;
             if (blockingUi)
             {
-                _progressFactory = t => WaitDialogProgress.StartAsync(serviceProvider, t);
+                progressFactory = t => WaitDialogProgress.StartAsync(serviceProvider, t);
             }
             else
             {
-                _progressFactory = t => StatusBarProgress.StartAsync(serviceProvider, t);
+                progressFactory = t => StatusBarProgress.StartAsync(serviceProvider, t);
             }
 
-            _msbuildOutputVerbosity = new Lazy<int>(
-                valueFactory: () => GetMSBuildOutputVerbositySetting(serviceProvider));
+            await ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+            {
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                errorListProvider.Tasks.Clear();
+            });
 
-            _buildOutputPane = new Lazy<EnvDTE.OutputWindowPane>(
-                valueFactory: () => GetBuildOutputPane(serviceProvider));
+            return new RestoreOperationLogger(
+                serviceProvider, 
+                errorListProvider,
+                buildOutputPane,
+                progressFactory, 
+                msbuildOutputVerbosity);
         }
 
         public void Dispose()
@@ -135,11 +158,8 @@ namespace NuGet.PackageManagement.VisualStudio
                 return;
             }
 
-            ThreadHelper.JoinableTaskFactory.Run(async delegate
+            Do((_, progress) =>
             {
-                // Switch to main thread to update the progress dialog, output window or error list window
-                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-
                 // Only show messages with VerbosityLevel.Normal. That is, info messages only.
                 // Do not show errors, warnings, verbose or debug messages on the progress dialog
                 // Avoid showing indented messages, these are typically not useful for the progress dialog since
@@ -147,7 +167,7 @@ namespace NuGet.PackageManagement.VisualStudio
                 if (verbosityLevel == VerbosityLevel.Normal &&
                     message.Length == message.TrimStart().Length)
                 {
-                    await RestoreOperationProgressUI.Current.ReportProgressAsync(message);
+                    progress?.ReportProgress(message);
                 }
 
                 // Write to the output window. Based on _msBuildOutputVerbosity, the message may or may not
@@ -182,19 +202,16 @@ namespace NuGet.PackageManagement.VisualStudio
         {
             ThreadHelper.ThrowIfNotOnUIThread();
 
-            if (OutputVerbosity >= (int)verbosity && _buildOutputPane.Value != null)
+            if (OutputVerbosity >= (int)verbosity && _outputWindowPane != null)
             {
-                var outputPane = _buildOutputPane.Value;
-
-                var msg = string.Format(CultureInfo.CurrentCulture, format, args);
-                outputPane.OutputString(msg);
-                outputPane.OutputString(Environment.NewLine);
+                _outputWindowPane.OutputString(string.Format(CultureInfo.CurrentCulture, format, args));
+                _outputWindowPane.OutputString(Environment.NewLine);
             }
         }
 
-        private static EnvDTE.OutputWindowPane GetBuildOutputPane(IServiceProvider serviceProvider)
+        private static async Task<EnvDTE.OutputWindowPane> GetBuildOutputPaneAsync(IServiceProvider serviceProvider)
         {
-            return ThreadHelper.JoinableTaskFactory.Run(async delegate
+            return await ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
             {
                 // Switch to main thread to use DTE
                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
@@ -208,37 +225,42 @@ namespace NuGet.PackageManagement.VisualStudio
             });
         }
 
-        public void LogException(Exception ex, bool logError)
+        public Task LogExceptionAsync(Exception ex, bool logError)
         {
-            string message;
-            if (OutputVerbosity < 3)
+            return DoAsync((_, __) =>
             {
-                message = string.Format(CultureInfo.CurrentCulture,
-                    Strings.ErrorOccurredRestoringPackages,
-                    ex.Message);
-            }
-            else
-            {
-                // output exception detail when _msBuildOutputVerbosity is >= Detailed.
-                message = string.Format(CultureInfo.CurrentCulture, Strings.ErrorOccurredRestoringPackages, ex);
-            }
+                string message;
+                if (OutputVerbosity < 3)
+                {
+                    message = string.Format(CultureInfo.CurrentCulture,
+                        Strings.ErrorOccurredRestoringPackages,
+                        ex.Message);
+                }
+                else
+                {
+                    // output exception detail when _msBuildOutputVerbosity is >= Detailed.
+                    message = string.Format(CultureInfo.CurrentCulture, Strings.ErrorOccurredRestoringPackages, ex);
+                }
 
-            if (logError)
-            {
-                // Write to the error window and console
-                LogError(message);
-            }
-            else
-            {
-                // Write to console
-                WriteLine(VerbosityLevel.Quiet, message);
-            }
+                if (logError)
+                {
+                    // Write to the error window and console
+                    LogError(message);
+                }
+                else
+                {
+                    // Write to console
+                    WriteLine(VerbosityLevel.Quiet, message);
+                }
 
-            ExceptionHelper.WriteToActivityLog(ex);
+                ExceptionHelper.WriteToActivityLog(ex);
+            });
         }
 
         public void ShowError(string errorText)
         {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
             MessageHelper.ShowError(
                 _errorListProvider,
                 TaskErrorCategory.Error,
@@ -248,15 +270,88 @@ namespace NuGet.PackageManagement.VisualStudio
         }
 
         /// <summary>
+        /// Helper async method to run batch of logging call on the main UI thread.
+        /// </summary>
+        /// <param name="action">Sync callback invoking logger.</param>
+        /// <returns>An awaitable task.</returns>
+        public async Task DoAsync(Action<RestoreOperationLogger, RestoreOperationProgressUI> action)
+        {
+            // capture current progress from the current execution context
+            var progress = RestoreOperationProgressUI.Current;
+
+            await ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+            {
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                action(this, progress);
+            });
+        }
+
+        /// <summary>
+        /// Helper synchronous method to run batch of logging call on the main UI thread.
+        /// </summary>
+        /// <param name="action">Sync callback invoking logger.</param>
+        public void Do(Action<RestoreOperationLogger, RestoreOperationProgressUI> action)
+        {
+            // capture current progress from the current execution context
+            var progress = RestoreOperationProgressUI.Current;
+
+            ThreadHelper.JoinableTaskFactory.Run(async () =>
+            {
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                action(this, progress);
+            });
+        }
+
+        public async Task RunWithProgressAsync(
+            Func<RestoreOperationLogger, RestoreOperationProgressUI, Task> asyncRunMethod,
+            Action userCancellationAction,
+            CancellationToken token)
+        {
+            using (var progress = await _progressFactory(token))
+            using (var ctr = progress.RegisterUserCancellationAction(userCancellationAction))
+            {
+                RestoreOperationProgressUI.Current = progress;
+                try
+                {
+                    await asyncRunMethod(this, progress);
+                }
+                finally
+                {
+                    RestoreOperationProgressUI.Current = null;
+                }
+            }
+        }
+
+        public async Task RunWithProgressAsync(
+            Action<RestoreOperationLogger, RestoreOperationProgressUI> runAction,
+            Action userCancellationAction,
+            CancellationToken token)
+        {
+            using (var progress = await _progressFactory(token))
+            using (var ctr = progress.RegisterUserCancellationAction(userCancellationAction))
+            {
+                RestoreOperationProgressUI.Current = progress;
+                try
+                {
+                    runAction(this, progress);
+                }
+                finally
+                {
+                    RestoreOperationProgressUI.Current = null;
+                }
+            }
+        }
+
+        /// <summary>
         /// Returns the value of the VisualStudio MSBuildOutputVerbosity setting.
         /// </summary>
         /// <param name="dte">The VisualStudio instance.</param>
         /// <remarks>
         /// 0 is Quiet, while 4 is diagnostic.
         /// </remarks>
-        private static int GetMSBuildOutputVerbositySetting(IServiceProvider serviceProvider)
+        private static async Task<int> GetMSBuildOutputVerbositySettingAsync(IServiceProvider serviceProvider)
         {
-            return ThreadHelper.JoinableTaskFactory.Run(async delegate
+            return await ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
             {
                 // Switch to main thread to use DTE
                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
@@ -273,8 +368,6 @@ namespace NuGet.PackageManagement.VisualStudio
             });
         }
 
-        public Task<RestoreOperationProgressUI> StartProgressSessionAsync(CancellationToken token) => _progressFactory(token);
-
         private class WaitDialogProgress : RestoreOperationProgressUI
         {
             private readonly ThreadedWaitDialogHelper.Session _session;
@@ -287,7 +380,7 @@ namespace NuGet.PackageManagement.VisualStudio
 
             public static async Task<RestoreOperationProgressUI> StartAsync(IServiceProvider serviceProvider, CancellationToken token)
             {
-                var progress = await ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+                return await ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
                 {
                     await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
@@ -306,15 +399,10 @@ namespace NuGet.PackageManagement.VisualStudio
 
                     return new WaitDialogProgress(session);
                 });
-
-                Current = progress;
-                return progress;
             }
 
             public override void Dispose()
             {
-                Current = null;
-
                 ThreadHelper.JoinableTaskFactory.Run(async () =>
                 {
                     await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
@@ -322,17 +410,15 @@ namespace NuGet.PackageManagement.VisualStudio
                 });
             }
 
-            public override async Task ReportProgressAsync(
+            public override void ReportProgress(
                 string progressMessage,
                 uint currentStep,
                 uint totalSteps)
             {
-                await ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
-                {
-                    await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                ThreadHelper.ThrowIfNotOnUIThread();
 
-                    // When both currentStep and totalSteps are 0, we get a marquee on the dialog
-                    var progressData = new ThreadedWaitDialogProgressData(
+                // When both currentStep and totalSteps are 0, we get a marquee on the dialog
+                var progressData = new ThreadedWaitDialogProgressData(
                         progressMessage,
                         progressText: string.Empty,
                         statusBarText: string.Empty,
@@ -340,8 +426,7 @@ namespace NuGet.PackageManagement.VisualStudio
                         currentStep: (int)currentStep,
                         totalSteps: (int)totalSteps);
 
-                    _session.Progress.Report(progressData);
-                });
+                _session.Progress.Report(progressData);
             }
         }
 
@@ -360,37 +445,32 @@ namespace NuGet.PackageManagement.VisualStudio
                 IServiceProvider serviceProvider,
                 CancellationToken token)
             {
-                var instance = await ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+                return await ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
                 {
                     await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
-                    var StatusBar = serviceProvider.GetService<SVsStatusbar, IVsStatusbar>();
+                    var statusBar = serviceProvider.GetService<SVsStatusbar, IVsStatusbar>();
 
                     // Make sure the status bar is not frozen
                     int frozen;
-                    StatusBar.IsFrozen(out frozen);
+                    statusBar.IsFrozen(out frozen);
 
                     if (frozen != 0)
                     {
-                        StatusBar.FreezeOutput(0);
+                        statusBar.FreezeOutput(0);
                     }
 
-                    StatusBar.Animation(1, ref icon);
+                    statusBar.Animation(1, ref icon);
 
-                    RestoreOperationProgressUI progress = new StatusBarProgress(StatusBar);
-                    await progress.ReportProgressAsync(Strings.RestoringPackages);
+                    RestoreOperationProgressUI progress = new StatusBarProgress(statusBar);
+                    progress.ReportProgress(Strings.RestoringPackages);
 
                     return progress;
                 });
-
-                Current = instance;
-                return instance;
             }
 
             public override void Dispose()
             {
-                Current = null;
-
                 ThreadHelper.JoinableTaskFactory.Run(async () =>
                 {
                     await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
@@ -402,27 +482,28 @@ namespace NuGet.PackageManagement.VisualStudio
                 });
             }
 
-            public override async Task ReportProgressAsync(
+            public override void ReportProgress(
                 string progressMessage,
                 uint currentStep,
                 uint totalSteps)
             {
-                await ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+                ThreadHelper.ThrowIfNotOnUIThread();
+
+                // Make sure the status bar is not frozen
+                int frozen;
+                StatusBar.IsFrozen(out frozen);
+
+                if (frozen != 0)
                 {
-                    await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                    StatusBar.FreezeOutput(0);
+                }
 
-                    // Make sure the status bar is not frozen
-                    int frozen;
-                    StatusBar.IsFrozen(out frozen);
+                StatusBar.SetText(progressMessage);
 
-                    if (frozen != 0)
-                    {
-                        StatusBar.FreezeOutput(0);
-                    }
-
-                    StatusBar.SetText(progressMessage);
+                if (totalSteps != 0)
+                {
                     StatusBar.Progress(ref cookie, 1, "", currentStep, totalSteps);
-                });
+                }
             }
         }
     }

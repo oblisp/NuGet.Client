@@ -3,7 +3,6 @@
 
 using System;
 using System.Threading;
-using Task = System.Threading.Tasks.Task;
 
 namespace NuGet.PackageManagement.VisualStudio
 {
@@ -25,7 +24,7 @@ namespace NuGet.PackageManagement.VisualStudio
 
         public CancellationToken UserCancellationToken { get; protected set; } = CancellationToken.None;
 
-        public abstract Task ReportProgressAsync(
+        public abstract void ReportProgress(
             string progressMessage,
             uint currentStep = 0,
             uint totalSteps = 0);

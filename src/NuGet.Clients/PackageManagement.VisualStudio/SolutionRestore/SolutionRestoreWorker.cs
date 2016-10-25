@@ -129,9 +129,6 @@ namespace NuGet.PackageManagement.VisualStudio
             return ThreadHelper.JoinableTaskFactory.Run(
                 async () =>
                 {
-                    // Hop onto a background pool thread
-                    await TaskScheduler.Default;
-
                     using (var restoreOperation = new BackgroundRestoreOperation(blockingUi: true))
                     {
                         await PromoteTaskToActiveAsync(restoreOperation, _workerCts.Token);
@@ -218,13 +215,12 @@ namespace NuGet.PackageManagement.VisualStudio
             SolutionRestoreRequest request,
             CancellationToken token)
         {
-            // Start the restore job in a separate task
-            // it will switch into main thread.
-            var joinableTask = ThreadHelper.JoinableTaskFactory.RunAsync(
+            // Start the restore job in a separate task on a background thread
+            // it will switch into main thread when necessary.
+            var joinableTask = Task.Run(
                 () => StartRestoreJobAsync(request, restoreOperation.BlockingUI, token));
 
             await joinableTask
-                .Task
                 .ContinueWith(t => restoreOperation.ContinuationAction(t));
 
             return await restoreOperation;
@@ -264,19 +260,17 @@ namespace NuGet.PackageManagement.VisualStudio
         private async Task<bool> StartRestoreJobAsync(
             SolutionRestoreRequest jobArgs, bool blockingUi, CancellationToken token)
         {
-            // To be sure, switch to main thread before doing anything on this method
-            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-
-            _errorListProvider.Tasks.Clear();
-
-            using (var logger = new RestoreOperationLogger(_serviceProvider, _errorListProvider, blockingUi))
-            using (var job = new SolutionRestoreJob(_serviceProvider, _componentModel.Value, logger))
+            using (var logger = await RestoreOperationLogger.StartAsync(
+                _serviceProvider, _errorListProvider, blockingUi, token))
+            using (var job = await SolutionRestoreJob.CreateAsync(
+                _serviceProvider, _componentModel.Value, logger, token))
             {
                 return await job.ExecuteAsync(jobArgs, _restoreJobContext, token);
             }
         }
 
-        private class BackgroundRestoreOperation : IEquatable<BackgroundRestoreOperation>, IDisposable
+        private class BackgroundRestoreOperation
+            : IEquatable<BackgroundRestoreOperation>, IDisposable
         {
             private readonly Guid _id = Guid.NewGuid();
 
