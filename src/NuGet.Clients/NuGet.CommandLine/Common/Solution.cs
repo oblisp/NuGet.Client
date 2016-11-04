@@ -86,13 +86,17 @@ namespace NuGet.Common
             PropertyInfo projectTypeProperty = projectInSolutionType.GetProperty(
                 "ProjectType",
                 BindingFlags.NonPublic | BindingFlags.Instance);
+            PropertyInfo projectGuidProperty = projectInSolutionType.GetProperty(
+                "ProjectGuid",
+                BindingFlags.NonPublic | BindingFlags.Instance);
             var projects = new List<ProjectInSolution>();
             foreach (var proj in (object[])projectsProperty.GetValue(solutionParser, index: null))
             {
                 string projectType = projectTypeProperty.GetValue(proj, index: null).ToString();
                 var isSolutionFolder = projectType.Equals("SolutionFolder", StringComparison.OrdinalIgnoreCase);
                 var relativePath = (string)relativePathProperty.GetValue(proj, index: null);
-                projects.Add(new ProjectInSolution(relativePath, isSolutionFolder));
+                var projectGuid = (string)projectGuidProperty.GetValue(proj, index: null);
+                projects.Add(new ProjectInSolution(relativePath, isSolutionFolder, projectGuid));
             }
             this.Projects = projects;
         }
@@ -111,7 +115,8 @@ namespace NuGet.Common
                 string projectType = project.ProjectType.ToString();
                 var isSolutionFolder = projectType.Equals("SolutionFolder", StringComparison.OrdinalIgnoreCase);
                 string relativePath = project.RelativePath;
-                projects.Add(new ProjectInSolution(relativePath, isSolutionFolder));
+                string projectGuid = project.ProjectGuid;
+                projects.Add(new ProjectInSolution(relativePath, isSolutionFolder, projectGuid));
             }
             this.Projects = projects;
         }

@@ -294,6 +294,36 @@ namespace NuGet.CommandLine
             }
         }
 
+        public static String PROJECT_PROPERTY_GUID = "guid";
+
+        public static String PROJECT_PROPERTY_PATH = "path";
+
+        public static IEnumerable<Dictionary<string, string>> GetAllProjectInfos(string solutionFile, string msbuildPath)
+        {
+            try
+            {
+                var solution = new Solution(solutionFile, msbuildPath);
+                var solutionDirectory = Path.GetDirectoryName(solutionFile);
+                return solution.Projects.Where(project => !project.IsSolutionFolder)
+                    .Select(project => {
+                        Dictionary<string, string> dict = new Dictionary<string, string>();
+                        dict[PROJECT_PROPERTY_GUID] = project.ProjectGuid;
+                        dict[PROJECT_PROPERTY_PATH] = Path.Combine(solutionDirectory, project.RelativePath);
+                        return dict;
+                    });
+            }
+            catch (Exception ex)
+            {
+                var message = string.Format(
+                    CultureInfo.CurrentCulture,
+                    LocalizedResourceManager.GetString("Error_SolutionFileParseError"),
+                    solutionFile,
+                    ex.Message);
+
+                throw new CommandLineException(message);
+            }
+        }
+
         /// <summary>
         /// Gets the version of MSBuild in PATH.
         /// </summary>

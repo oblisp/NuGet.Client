@@ -19,10 +19,13 @@ namespace NuGet.Common
         /// </summary>
         public bool IsSolutionFolder { get; private set; }
 
-        public ProjectInSolution(string relativePath, bool isSolutionFolder)
+        public string ProjectGuid { get; private set; }
+
+        public ProjectInSolution(string relativePath, bool isSolutionFolder, string projectGuid)
         {
             RelativePath = relativePath;
             IsSolutionFolder = isSolutionFolder;
+            ProjectGuid = projectGuid;
         }
     }
 }

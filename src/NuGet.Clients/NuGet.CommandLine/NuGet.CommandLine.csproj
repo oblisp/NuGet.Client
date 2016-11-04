@@ -77,6 +77,11 @@
     <Compile Include="DebugHelper.cs" />
     <Compile Include="DiagnosticCommands.cs" />
     <Compile Include="ExtensionLocator.cs" />
+    <Compile Include="Extension\Commands\TransCommand.cs" />
+    <Compile Include="Extension\Common\MSBuildProjectSystem.cs" />
+    <Compile Include="Extension\Common\PackageContent.cs" />
+    <Compile Include="Extension\Common\PackageContentItem.cs" />
+    <Compile Include="Extension\Common\PackageContentManager.cs" />
     <Compile Include="FileConflictAction.cs" />
     <Compile Include="ICommandManager.cs" />
     <Compile Include="MSBuildTasks\ProjectReferencesTask.cs" />
