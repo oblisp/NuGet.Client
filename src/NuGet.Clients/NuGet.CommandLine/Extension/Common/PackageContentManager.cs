@@ -97,8 +97,8 @@ namespace NuGet.Extension.Common
 
             PKG_MAPPINGS.Add("BarCodes1D", PKG_BAR_CODES);
 
-            PKG_MAPPINGS.Add("itextsharp", new PackageContent(new PackageIdentity("itextsharp", new Versioning.NuGetVersion("5.5.9"))));
-            PKG_MAPPINGS.Add("itextsharp.pdfa", new PackageContent(new PackageIdentity("itextsharp.pdfa", new Versioning.NuGetVersion("5.5.9"))));
+            PKG_MAPPINGS.Add("itextsharp", new PackageContent(new PackageIdentity("itextsharp", new Versioning.NuGetVersion("5.5.9")), PackageContent.TARGET_FRAMEWORK_ALL));
+            PKG_MAPPINGS.Add("itextsharp.pdfa", new PackageContent(new PackageIdentity("itextsharp.pdfa", new Versioning.NuGetVersion("5.5.9")), PackageContent.TARGET_FRAMEWORK_ALL));
 
             PKG_MAPPINGS.Add("zxing", PKG_ZXING); 
         }

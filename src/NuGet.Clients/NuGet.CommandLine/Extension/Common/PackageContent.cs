@@ -9,13 +9,23 @@ namespace NuGet.Extension.Common
 {
     public class PackageContent
     {
+        public static string TARGET_FRAMEWORK_ALL = "all";
+
         public PackageIdentity Id { get; private set; }
 
         public ISet<PackageContentItem> Content { get; set; }
 
+        public String TargetFramework { get; private set; }
+
         public PackageContent(PackageIdentity id)
         {
             Id = id;
+        }
+
+        public PackageContent(PackageIdentity id, String targetFramework)
+        {
+            Id = id;
+            TargetFramework = targetFramework;
         }
 
         public void AddItem(PackageContentItem item)

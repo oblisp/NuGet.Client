@@ -223,13 +223,23 @@ namespace NuGet.Extension.Commands
             string solutionDir = Directory.GetParent(Solution).FullName;
             if(package.Content == null || package.Content.Count <= 0)
             {
-                string referencePath = Path.Combine(
+                string referenceBasePath = Path.Combine(
                     Directory.GetParent(solutionDir).FullName,
                     "packages",
                     package.Id.ToString(),
-                    "lib",
-                    project.TargetFramework.GetShortFolderName(),
-                    package.Id.Id + ".dll");
+                    "lib");
+                string referencePath = null;
+                if (PackageContent.TARGET_FRAMEWORK_ALL.Equals(package.TargetFramework))
+                {
+                    referencePath = Path.Combine(referenceBasePath, 
+                        package.Id.Id + ".dll");
+                }
+                else
+                {
+                    referencePath = Path.Combine(referenceBasePath, 
+                        project.TargetFramework.GetShortFolderName(), 
+                        package.Id.Id + ".dll");
+                }
                 project.AddReference(referencePath);
             }
             else
