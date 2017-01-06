@@ -27,6 +27,12 @@ namespace NuGet.Extension.Common
 
         private static PackageContent PKG_ZXING;
 
+        private static PackageContent PKG_AFORGE;
+
+        private static PackageContent PKG_ZIP_LIB;
+
+        private static PackageContent PKG_WEBSOCKET;
+
         private Dictionary<string, PackageContent> PKG_MAPPINGS = new Dictionary<string, PackageContent>();
 
         private Dictionary<string, IEnumerable<PackageIdentity>> PKG_LIST_MAPPINGS = new Dictionary<string, IEnumerable<PackageIdentity>>();
@@ -66,6 +72,18 @@ namespace NuGet.Extension.Common
             PKG_ZXING = new PackageContent(new PackageIdentity("ZXing.Net", new Versioning.NuGetVersion("0.14.0.1")));
             PKG_ZXING.AddItem(new PackageContentItem("zxing", NULL_VERSION));
             PKG_ZXING.AddItem(new PackageContentItem("zxing.presentation", NULL_VERSION));
+
+
+            PKG_AFORGE = new PackageContent(new PackageIdentity("AForge", new Versioning.NuGetVersion("2.2.5")), PackageContent.TARGET_FRAMEWORK_ALL);
+            PKG_AFORGE.AddItem(new PackageContentItem("AForge", new Versioning.NuGetVersion("2.2.5")));
+            PKG_AFORGE.AddItem(new PackageContentItem("AForge.Imaging", new Versioning.NuGetVersion("2.2.5")));
+            PKG_AFORGE.AddItem(new PackageContentItem("AForge.Math", new Versioning.NuGetVersion("2.2.5")));
+
+            PKG_ZIP_LIB = new PackageContent(new PackageIdentity("SharpZipLib", new Versioning.NuGetVersion("0.86.0")), "20");
+            PKG_ZIP_LIB.AddItem(new PackageContentItem("SharpZipLib", new Versioning.NuGetVersion("0.86.0"), "ICSharpCode.SharpZipLib"));
+
+            PKG_WEBSOCKET = new PackageContent(new PackageIdentity("WebSocketSharp", new Versioning.NuGetVersion("1.0.3-rc11")), PackageContent.TARGET_FRAMEWORK_ALL);
+            PKG_WEBSOCKET.AddItem(new PackageContentItem("WebSocketSharp", new Versioning.NuGetVersion("1.0.3-rc11"), "websocket-sharp"));
         }
 
         public PackageContentManager(String defaultPackageVersion)
@@ -100,7 +118,15 @@ namespace NuGet.Extension.Common
             PKG_MAPPINGS.Add("itextsharp", new PackageContent(new PackageIdentity("itextsharp", new Versioning.NuGetVersion("5.5.9")), PackageContent.TARGET_FRAMEWORK_ALL));
             PKG_MAPPINGS.Add("itextsharp.pdfa", new PackageContent(new PackageIdentity("itextsharp.pdfa", new Versioning.NuGetVersion("5.5.9")), PackageContent.TARGET_FRAMEWORK_ALL));
 
-            PKG_MAPPINGS.Add("zxing", PKG_ZXING); 
+            PKG_MAPPINGS.Add("websocket-sharp", PKG_WEBSOCKET);
+
+            PKG_MAPPINGS.Add("DCSoft.Writer", new PackageContent(new PackageIdentity("IIH.DCSoft.Writer", new Versioning.NuGetVersion("1.0.0"))));
+
+            PKG_MAPPINGS.Add("zxing", PKG_ZXING);
+
+            PKG_MAPPINGS.Add("AForge.Imaging", PKG_AFORGE);
+
+            PKG_MAPPINGS.Add("ICSharpCode.SharpZipLib", PKG_ZIP_LIB);
         }
 
         public PackageContent findPackageContent(String key)

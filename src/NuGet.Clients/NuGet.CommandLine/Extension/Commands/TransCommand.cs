@@ -56,6 +56,8 @@ namespace NuGet.Extension.Commands
                 var path = project[MsBuildUtility.PROJECT_PROPERTY_PATH];
                 var ps = new MSBuildProjectSystem(msbuildDirectory.Value, path, ctx);
                 Console.WriteLine(ps.ProjectFileFullPath);
+                // TODO 都转换为Library？
+                ps.setProperty("OutputType", "Library");
                 ps.setProperty("Debug", "AnyCPU", "OutputPath", "bin\\Debug\\");
                 ps.setProperty("Release", "AnyCPU", "OutputPath", "bin\\Release\\");
                 ps.setProperty("Debug", "x86", "OutputPath", "bin\\Debug\\");
@@ -210,6 +212,10 @@ namespace NuGet.Extension.Commands
                                 continue;
                             }
                             PackageIdentity pkgId = new PackageIdentity(item.Name, item.Version);
+                            if(pkgId.Equals(package.Id))
+                            {
+                                continue;
+                            }
                             writer.AddPackageEntry(pkgId, project.TargetFramework);
                         }
                     }
@@ -221,25 +227,25 @@ namespace NuGet.Extension.Commands
         {
             // basePath\[packageId].[packageVersion]\[framework]\lib\xxx.dll
             string solutionDir = Directory.GetParent(Solution).FullName;
-            if(package.Content == null || package.Content.Count <= 0)
+            string targetFramework = package.TargetFramework;
+            if(targetFramework == null || targetFramework.Length <= 0)
+            {
+                targetFramework = project.TargetFramework.GetShortFolderName();
+            }
+            if (PackageContent.TARGET_FRAMEWORK_ALL.Equals(package.TargetFramework))
+            {
+                targetFramework = "";
+            }
+            if (package.Content == null || package.Content.Count <= 0)
             {
                 string referenceBasePath = Path.Combine(
                     Directory.GetParent(solutionDir).FullName,
                     "packages",
                     package.Id.ToString(),
                     "lib");
-                string referencePath = null;
-                if (PackageContent.TARGET_FRAMEWORK_ALL.Equals(package.TargetFramework))
-                {
-                    referencePath = Path.Combine(referenceBasePath, 
-                        package.Id.Id + ".dll");
-                }
-                else
-                {
-                    referencePath = Path.Combine(referenceBasePath, 
-                        project.TargetFramework.GetShortFolderName(), 
-                        package.Id.Id + ".dll");
-                }
+                string referencePath = Path.Combine(referenceBasePath,
+                    targetFramework,
+                    package.Id.Id + ".dll");
                 project.AddReference(referencePath);
             }
             else
@@ -253,7 +259,7 @@ namespace NuGet.Extension.Commands
                         "packages",
                         pkgName,
                         "lib",
-                        project.TargetFramework.GetShortFolderName(),
+                        targetFramework,
                         dllName + ".dll");
                     project.AddReference(referencePath);
                 }
