@@ -19,9 +19,9 @@ namespace NuGet.Extension.Commands
 {
     [Export]
     [Command(
-        "transform", 
+        "transform",
         "transform solution's projects",
-        MinArgs = 0, 
+        MinArgs = 0,
         MaxArgs = 1)]
     public class TransCommand : Command
     {
@@ -43,7 +43,7 @@ namespace NuGet.Extension.Commands
             Lazy<string> msbuildDirectory = MsBuildUtility.GetMsbuildDirectoryFromMsbuildPath(null, null, Console);
             var projectInfos = MsBuildUtility.GetAllProjectInfos(Solution, msbuildDirectory.Value);
             Dictionary<string, Dictionary<string, string>> projects = new Dictionary<string, Dictionary<string, string>>();
-            foreach(var projectInfo in projectInfos)
+            foreach (var projectInfo in projectInfos)
             {
                 string path = projectInfo[MsBuildUtility.PROJECT_PROPERTY_PATH];
                 path = Path.GetFileNameWithoutExtension(path);
@@ -80,7 +80,7 @@ namespace NuGet.Extension.Commands
         {
             Manifest manifest = new Manifest();
             string fileName = Path.GetFileNameWithoutExtension(ps.ProjectFileFullPath);
-            string pkgName = transformPackageName(fileName);
+            string pkgName = transformPackageName(ps, fileName);
             manifest.Metadata.Id = pkgName;
             manifest.Metadata.Version = "$version$";
             manifest.Metadata.Description = pkgName;
@@ -105,7 +105,7 @@ namespace NuGet.Extension.Commands
             var projectName = getProjectName(project);
             foreach (var reference in project.getReferences())
             {
-                if(!isXAPClientDirectoryReference(project, reference))
+                if (!isXAPClientDirectoryReference(project, reference))
                 {
                     // 不是xaptools里的引用，直接跳过
                     continue;
@@ -154,7 +154,7 @@ namespace NuGet.Extension.Commands
 
         private void createProjectReferences(MSBuildProjectSystem project, List<dynamic> projectReferences)
         {
-            foreach(dynamic r in projectReferences)
+            foreach (dynamic r in projectReferences)
             {
                 createProjectReference(project, r);
             }
@@ -175,7 +175,7 @@ namespace NuGet.Extension.Commands
             {
                 var refName = getReferenceName(project, reference);
                 PackageContent pkg = packageContentManager.findPackageContent(refName);
-                if(pkg == null)
+                if (pkg == null)
                 {
                     Console.WriteWarning("can not find package " + refName);
                     continue;
@@ -183,7 +183,7 @@ namespace NuGet.Extension.Commands
                 // 删除当前引用
                 project.RemoveReference(refName + ".dll");
                 // 映射到已知的库上去
-                if(packageIdsToAdd.Contains(pkg.Id))
+                if (packageIdsToAdd.Contains(pkg.Id))
                 {
                     continue;
                 }
@@ -205,14 +205,14 @@ namespace NuGet.Extension.Commands
                         writer.AddPackageEntry(package.Id, project.TargetFramework);
                         if (package.Content == null)
                             continue;
-                        foreach(PackageContentItem item in package.Content)
+                        foreach (PackageContentItem item in package.Content)
                         {
-                            if(!item.isNugetPackage)
+                            if (!item.isNugetPackage)
                             {
                                 continue;
                             }
                             PackageIdentity pkgId = new PackageIdentity(item.Name, item.Version);
-                            if(pkgId.Equals(package.Id))
+                            if (pkgId.Equals(package.Id))
                             {
                                 continue;
                             }
@@ -228,7 +228,7 @@ namespace NuGet.Extension.Commands
             // basePath\[packageId].[packageVersion]\[framework]\lib\xxx.dll
             string solutionDir = Directory.GetParent(Solution).FullName;
             string targetFramework = package.TargetFramework;
-            if(targetFramework == null || targetFramework.Length <= 0)
+            if (targetFramework == null || targetFramework.Length <= 0)
             {
                 targetFramework = project.TargetFramework.GetShortFolderName();
             }
@@ -263,7 +263,7 @@ namespace NuGet.Extension.Commands
                         dllName + ".dll");
                     project.AddReference(referencePath);
                 }
-            }            
+            }
         }
 
         private void createProjectJson(MSBuildProjectSystem ps, HashSet<string> projectNames)
@@ -274,7 +274,7 @@ namespace NuGet.Extension.Commands
                 Dependencies = new List<LibraryDependency>(),
             };
             PackageSpec spec = new PackageSpec(new List<TargetFrameworkInformation>() { framework });
-            spec.Name = this.transformPackageName(Path.GetFileNameWithoutExtension(ps.ProjectName));
+            spec.Name = this.transformPackageName(ps, Path.GetFileNameWithoutExtension(ps.ProjectName));
             foreach (var r in ps.getReferences())
             {
                 // Console.Write("\t");
@@ -295,7 +295,7 @@ namespace NuGet.Extension.Commands
                     continue;
                 }
                 // ps.RemoveReference(refName);
-                String transformedRefName = transformPackageName(refName);
+                String transformedRefName = transformPackageName(ps, refName);
                 Version refVersion = ps.getReferenceVersion(r);
 
                 LibraryDependency dep = new LibraryDependency();
@@ -304,14 +304,14 @@ namespace NuGet.Extension.Commands
                 {
                     libRange = new LibraryRange(transformedRefName, LibraryDependencyTarget.Project);
                 }
-                else if(refName.StartsWith("xap.") || refName.StartsWith("iih."))
+                else if (refName.StartsWith("xap.") || refName.StartsWith("iih."))
                 {
                     // TODO
                     NuGetVersion ngv = new NuGetVersion("0.2.0");
                     VersionRange versionRange = new VersionRange(ngv);
                     libRange = new LibraryRange(transformedRefName, versionRange, LibraryDependencyTarget.Package);
                 }
-                else if(refVersion != null)
+                else if (refVersion != null)
                 {
                     NuGetVersion ngv = new NuGetVersion(refVersion);
                     VersionRange versionRange = new VersionRange(ngv);
@@ -330,7 +330,7 @@ namespace NuGet.Extension.Commands
             JsonPackageSpecWriter.WritePackageSpec(spec, Path.Combine(ps.ProjectFullPath, "project.json"));
         }
 
-        private string transformPackageName(string name)
+        private string transformPackageName(MSBuildProjectSystem ps, string name)
         {
             // name = name.ToUpper();
             /*
@@ -338,7 +338,10 @@ namespace NuGet.Extension.Commands
             {
                 name = "IIH." + name.Substring(4);
             }*/
-            return name;
+            string assembly = ps.GetPropertyValue("AssemblyName");
+            if (assembly == null || assembly.Length <= 0)
+                return name;
+            return assembly;
         }
     }
 }
