@@ -107,7 +107,8 @@ namespace NuGet.Extension.Common
 
             PKG_MAPPINGS.Add("System.Data.SQLite", PKG_SQLITE);
 
-            PKG_MAPPINGS.Add("Newtonsoft.Json", new PackageContent(new PackageIdentity("Newtonsoft.Json", new Versioning.NuGetVersion("9.0.1"))));
+            // PKG_MAPPINGS.Add("Newtonsoft.Json", new PackageContent(new PackageIdentity("Newtonsoft.Json", new Versioning.NuGetVersion("9.0.1"))));
+            PKG_MAPPINGS.Add("Newtonsoft.Json", new PackageContent(new PackageIdentity("Newtonsoft.Json", new Versioning.NuGetVersion("6.0.8"))));
             PKG_MAPPINGS.Add("EntityFramework", new PackageContent(new PackageIdentity("EntityFramework", new Versioning.NuGetVersion("6.0.0"))));
 
             PKG_MAPPINGS.Add("Apache.NMS", new PackageContent(new PackageIdentity("Apache.NMS", new Versioning.NuGetVersion("1.7.1"))));
@@ -127,6 +128,10 @@ namespace NuGet.Extension.Common
             PKG_MAPPINGS.Add("AForge.Imaging", PKG_AFORGE);
 
             PKG_MAPPINGS.Add("ICSharpCode.SharpZipLib", PKG_ZIP_LIB);
+
+            // TODO
+            PKG_MAPPINGS.Add("Castle.Core", new PackageContent(new PackageIdentity("Castle.Core", new Versioning.NuGetVersion("3.3.0")), "net40-client"));
+            PKG_MAPPINGS.Add("Castle.Windsor", new PackageContent(new PackageIdentity("Castle.Windsor", new Versioning.NuGetVersion("3.3.0"))));
         }
 
         public PackageContent findPackageContent(String key)

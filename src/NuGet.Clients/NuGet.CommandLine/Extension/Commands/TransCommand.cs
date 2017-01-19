@@ -85,7 +85,6 @@ namespace NuGet.Extension.Commands
             manifest.Metadata.Version = "$version$";
             manifest.Metadata.Description = pkgName;
             manifest.Metadata.Authors = "PKU-HIT";
-
             manifest.Metadata.Tags = "IIH";
             manifest.Metadata.Copyright = "Copyright " + DateTime.Now.Year;
             string nuspecFile = Path.Combine(ps.ProjectFullPath, fileName + Constants.ManifestExtension);
