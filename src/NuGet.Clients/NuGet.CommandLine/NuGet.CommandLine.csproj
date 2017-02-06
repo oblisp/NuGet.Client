@@ -77,8 +77,12 @@
     <Compile Include="DebugHelper.cs" />
     <Compile Include="DiagnosticCommands.cs" />
     <Compile Include="ExtensionLocator.cs" />
+    <Compile Include="Extension\Commands\NuModuleCommand.cs" />
     <Compile Include="Extension\Commands\TransCommand.cs" />
     <Compile Include="Extension\Common\MSBuildProjectSystem.cs" />
+    <Compile Include="Extension\Common\NuModuleConstants.cs" />
+    <Compile Include="Extension\Common\NuModuleManifest.cs" />
+    <Compile Include="Extension\Common\NuModuleManifestEntry.cs" />
     <Compile Include="Extension\Common\PackageContent.cs" />
     <Compile Include="Extension\Common\PackageContentItem.cs" />
     <Compile Include="Extension\Common\PackageContentManager.cs" />
