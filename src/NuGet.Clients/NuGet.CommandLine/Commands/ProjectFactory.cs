@@ -77,12 +77,25 @@ namespace NuGet.CommandLine
         {
             LoadAssemblies(msbuildDirectory);
 
-            // create project
-            var project = Activator.CreateInstance(
-                _projectType,
-                path,
-                projectProperties,
-                null);
+            dynamic project = null;
+            dynamic globalProjectCollection = _projectCollectionType
+                .GetProperty("GlobalProjectCollection")
+                .GetMethod
+                .Invoke(null, new object[] { });
+            var loadedProjects = globalProjectCollection.GetLoadedProjects(path);
+            if (loadedProjects.Count > 0)
+            {
+                project = loadedProjects[0];
+            }
+            else
+            {
+                // create project
+                project = Activator.CreateInstance(
+                    _projectType,
+                    path,
+                    projectProperties,
+                    null);
+            }
             Initialize(project);
         }
 

@@ -46,6 +46,17 @@ namespace NuGet.Extension.Common
             Libraries.Add(entry);
         }
 
+        public void removeLibrary(PackageIdentity id)
+        {
+            NuModuleManifestEntry entry = new NuModuleManifestEntry();
+            entry.Id = id;
+            if (!Libraries.Contains(entry))
+            {
+                return;
+            }
+            Libraries.Remove(entry);
+        }
+
         public void addDependency(string id, string version)
         {
             PackageIdentity pkgId = new PackageIdentity(id, new Versioning.NuGetVersion(version));
@@ -69,9 +80,10 @@ namespace NuGet.Extension.Common
 
             XmlReaderSettings settings = new XmlReaderSettings();
             settings.IgnoreComments = true;
-            XmlReader reader = XmlReader.Create(xml, settings);
-            xmlDoc.Load(reader);
-
+            using (XmlReader reader = XmlReader.Create(xml, settings))
+            {
+                xmlDoc.Load(reader);
+            }
             var libraryNodes = xmlDoc.SelectNodes("/module/libraries/library");
             var libraryEnumerator = libraryNodes.GetEnumerator();
             while(libraryEnumerator.MoveNext())

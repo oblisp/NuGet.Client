@@ -1,21 +1,17 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using System.ComponentModel.Composition;
 using System.IO;
+using NuGet.Commands;
 using NuGet.CommandLine;
 using NuGet.ProjectManagement;
 using NuGet.Extension.Common;
-using NuGet.ProjectModel;
-using NuGet.LibraryModel;
 using NuGet.Versioning;
 using NuGet.Packaging.Core;
 using NuGet.Packaging;
 using NuGet.Resolver;
 using NuGet.Configuration;
-
 
 namespace NuGet.Extension.Commands
 {
@@ -44,6 +40,9 @@ namespace NuGet.Extension.Commands
 
         [Option("NuModuleCommandRepositoryPathDescription")]
         public String RepositoryPath { get; set; }
+
+        [Option("NuModuleCommandSymbolsDescription")]
+        public bool Symbols { get; set; }
 
         public override void ExecuteCommand()
         {
@@ -89,14 +88,18 @@ namespace NuGet.Extension.Commands
             PackagePathResolver pathResolver = new PackagePathResolver(installPath);
 
             ISet<PackageIdentity> globalDependencies = new HashSet<PackageIdentity>();
-            var moduleDependencies = resolveModuleDependencies(manifest);
+            var moduleDependencies = resolveModuleDependencies(manifest, pathResolver);
             foreach(var module in moduleDependencies)
             {
                 var modulePath = pathResolver.GetInstalledPath(module);
+                if(String.IsNullOrEmpty(modulePath))
+                {
+                    throw new Exception(String.Format("Can not find module {0} in {1}", module.Id, installPath));
+                }
                 var moduleManifestPath = Path.Combine(modulePath, "manifest");
                 NuModuleManifest moduleManifest = new NuModuleManifest(module.Id, module.Version.ToNormalizedString());
                 moduleManifest.read(moduleManifestPath);
-                globalDependencies.AddRange(moduleManifest.Libraries.Select((o)=> { return o.Id; }));
+                globalDependencies.AddRange(moduleManifest.Libraries.Where(o => NuModuleConstants.SCOPE_COMPILE.Equals(o.Scope)).Select(o => o.Id));
             }
 
             Lazy<string> msbuildDirectory = MsBuildUtility.GetMsbuildDirectoryFromMsbuildPath(null, null, Console);
@@ -105,23 +108,29 @@ namespace NuGet.Extension.Commands
             {
                 string projectPath = projectInfo[MsBuildUtility.PROJECT_PROPERTY_PATH];
                 var packagesConfig = Path.Combine(Path.GetDirectoryName(projectPath), "packages.config");
-                if(!File.Exists(packagesConfig))
+                if(File.Exists(packagesConfig))
                 {
-                    continue;
-                }
-                using(FileStream fs = new FileStream(packagesConfig, FileMode.Open, FileAccess.Read))
-                {
-                    PackagesConfigReader reader = new PackagesConfigReader(fs);
-                    foreach(var pkg in reader.GetPackages())
+                    using (FileStream fs = new FileStream(packagesConfig, FileMode.Open, FileAccess.Read))
                     {
-                        if(!globalDependencies.Contains(pkg.PackageIdentity))
+                        PackagesConfigReader reader = new PackagesConfigReader(fs);
+                        foreach (var pkg in reader.GetPackages())
                         {
-                            var message = String.Format("Can nof reference package {0}", pkg.PackageIdentity.ToString());
-                            Console.WriteWarning(message);
-                        }
-                        else
-                        {
-                            // manifest.addLibrary(pkg.PackageIdentity);
+                            var installedPath = pathResolver.GetInstalledPath(pkg.PackageIdentity);
+                            if (globalDependencies.Contains(pkg.PackageIdentity))
+                            {
+                                manifest.removeLibrary(pkg.PackageIdentity);
+                            }
+                            if (!globalDependencies.Contains(pkg.PackageIdentity) && !String.IsNullOrEmpty(installedPath))
+                            {
+                                var message = String.Format("Adding libraray {0} from repository, Are you sure?", pkg.PackageIdentity.ToString());
+                                Console.WriteWarning(message);
+                                manifest.addLibrary(pkg.PackageIdentity);
+                            }
+                            else if (!globalDependencies.Contains(pkg.PackageIdentity) && String.IsNullOrEmpty(installedPath))
+                            {
+                                var message = String.Format("Can not find libraray {0}", pkg.PackageIdentity.ToString());
+                                Console.WriteWarning(message);
+                            }
                         }
                     }
                 }
@@ -138,87 +147,19 @@ namespace NuGet.Extension.Commands
             var path = Path.Combine(modulePath, "manifest");
             manifest.read(path);
 
-            Manifest nuspec = new Manifest();
-            string pkgName = manifest.Name;
-            nuspec.Metadata.Id = pkgName;
-            nuspec.Metadata.Version = Version;
-            nuspec.Metadata.Description = pkgName;
-            nuspec.Metadata.Authors = "PKU-HIT";
-            nuspec.Metadata.Tags = "IIH";
-            nuspec.Metadata.Copyright = "Copyright " + DateTime.Now.Year;
-            // add dependencies
-            if(manifest.Dependencies != null)
+            Lazy<string> msbuildDirectory = MsBuildUtility.GetMsbuildDirectoryFromMsbuildPath(null, null, Console);
+            INuGetProjectContext projectCtx = new ConsoleProjectContext(Console);
+            var projectInfos = MsBuildUtility.GetAllProjectInfos(Solution, msbuildDirectory.Value);
+            Dictionary<string, MSBuildProjectSystem> projects = new Dictionary<string, MSBuildProjectSystem>();
+            foreach (var projectInfo in projectInfos)
             {
-                List<ManifestDependency> dependecyList = new List<ManifestDependency>();
-                foreach (var dep in manifest.Dependencies)
-                {
-                    ManifestDependency dependency = new ManifestDependency();
-                    dependency.Id = dep.Id.Id;
-                    dependency.Version = dep.Id.Version.ToFullString();
-                    dependecyList.Add(dependency);
-                }
-                ManifestDependencySet depSet = new ManifestDependencySet();
-                depSet.Dependencies = dependecyList;
-                // TODO targetFramework
-                // depSet.TargetFramework 
-                List<ManifestDependencySet> depSets = new List<ManifestDependencySet>();
-                depSets.Add(depSet);
-                nuspec.Metadata.DependencySets = depSets;
+                var projectPath = projectInfo[MsBuildUtility.PROJECT_PROPERTY_PATH];
+                var ps = new MSBuildProjectSystem(msbuildDirectory.Value, projectPath, projectCtx);
+                projects[Path.GetFileNameWithoutExtension(ps.ProjectName)] = ps;
             }
 
-            ManifestFile lib = new ManifestFile();
-            lib.Source = "lib\\**";
-            lib.Target = "lib";
-            ManifestFile runtime = new ManifestFile();
-            runtime.Source = "runtime\\**";
-            runtime.Target = "runtime";
-            ManifestFile moduleManifest = new ManifestFile();
-            moduleManifest.Source = "manifest\\**";
-            moduleManifest.Target = "manifest";
-            List<ManifestFile> files = new List<ManifestFile>();
-            files.Add(lib);
-            files.Add(runtime);
-            files.Add(moduleManifest);
-            nuspec.Files = files;
-            string nuspecFile = Path.Combine(OutputDirectory, pkgName, pkgName + Constants.ManifestExtension);
-            using (FileStream fs = new FileStream(nuspecFile, FileMode.Create))
-            {
-                nuspec.Save(fs, false);
-            }
-
-            var installPath = resolveInstallPath();
-            PackagePathResolver pathResolver = new PackagePathResolver(installPath);
-            var runtimePath = Path.Combine(modulePath, "runtime");
-            if(Directory.Exists(runtimePath))
-            {
-                Directory.Delete(runtimePath, true);
-            }
-            if (!Directory.Exists(runtimePath))
-            {
-                Directory.CreateDirectory(runtimePath);
-            }
-            var libPath = Path.Combine(modulePath, "lib");
-            if (Directory.Exists(libPath))
-            {
-                Directory.Delete(libPath, true);
-            }
-            if (!Directory.Exists(libPath))
-            {
-                Directory.CreateDirectory(libPath);
-            }
-            foreach(var l in manifest.Libraries)
-            {
-                var pkgDirName = pathResolver.GetPackageDirectoryName(l.Id);
-                var pkgLibDir = Path.Combine(installPath, pkgDirName, "lib");
-                if (String.IsNullOrEmpty(l.Scope) || NuModuleConstants.SCOPE_COMPILE.Equals(l.Scope))
-                {
-                    copyDirectory(pkgLibDir, libPath);
-                }
-                else if (NuModuleConstants.SCOPE_RUNTIME.Equals(l.Scope))
-                {
-                    copyDirectory(pkgLibDir, runtimePath);
-                }
-            }
+            var builder = createNuModulePackageBuilder(manifest, projects);
+            builder.Build();
         }
 
         private string resolveInstallPath()
@@ -244,73 +185,179 @@ namespace NuGet.Extension.Commands
             return null;
         }
 
-        private IEnumerable<PackageIdentity> resolveModuleDependencies(NuModuleManifest manifest)
+        private IEnumerable<PackageIdentity> resolveModuleDependencies(NuModuleManifest manifest, PackagePathResolver resolver)
         {
+            Dictionary<string, NuModuleManifest> nuModules = new Dictionary<string, NuModuleManifest>();
+            collectNuModulesByManifest(manifest, nuModules, resolver);
             IList<PackageIdentity> result = new List<PackageIdentity>();
-            var dependencies = manifest.Dependencies;
-            if(dependencies != null)
+            IList<ResolverPackage> toSort = new List<ResolverPackage>();
+            foreach (var nuModule in nuModules.Values)
             {
-                IList<ResolverPackage> toSort = new List<ResolverPackage>();
-                foreach (var dependency in dependencies)
+                List<NuGet.Packaging.Core.PackageDependency> nuModuleDeps = new List<NuGet.Packaging.Core.PackageDependency>();
+                foreach(var dep in nuModule.Dependencies)
                 {
-                    toSort.Add(new ResolverPackage(dependency.Id.Id, dependency.Id.Version));
+                    NuGet.Packaging.Core.PackageDependency nuModuleDep = new NuGet.Packaging.Core.PackageDependency(dep.Id.Id);
+                    nuModuleDeps.Add(nuModuleDep);
                 }
-                var sorted = ResolverUtility.TopologicalSort(toSort);
-                foreach(var s in sorted)
+                toSort.Add(new ResolverPackage(nuModule.Name,new NuGetVersion(nuModule.Version), nuModuleDeps, true, false));
+            }
+            var sorted = ResolverUtility.TopologicalSort(toSort);
+            foreach (var s in sorted)
+            {
+                result.Add(new PackageIdentity(s.Id, s.Version));
+            }
+            return result;
+        }
+
+        private void collectNuModulesByManifest(NuModuleManifest manifest, Dictionary<string, NuModuleManifest> nuModules, PackagePathResolver resolver)
+        {
+            foreach (var dep in manifest.Dependencies)
+            {
+                collectNuModulesByManifestEntry(dep, nuModules, resolver);
+            }
+        }
+
+        private void collectNuModulesByManifestEntry(NuModuleManifestEntry entry, Dictionary<string, NuModuleManifest> nuModules, PackagePathResolver resolver)
+        {
+            var modulePath = resolver.GetInstalledPath(entry.Id);
+            var moduleManifestPath = Path.Combine(modulePath, "manifest");
+            if(!Directory.Exists(moduleManifestPath))
+            {
+                Console.WriteWarning(String.Format("Can not find module {0}", entry.Id.ToString()));
+                return;
+            }
+            NuModuleManifest manifest = new NuModuleManifest(entry.Id.Id, entry.Id.Version.ToFullString());
+            manifest.read(moduleManifestPath);
+            if(nuModules.ContainsKey(manifest.Name))
+            {
+                return;
+            }
+            nuModules[manifest.Name] = manifest;
+            collectNuModulesByManifest(manifest, nuModules, resolver);
+        }
+
+        private NuModulePackageBuilder createNuModulePackageBuilder(NuModuleManifest manifest, Dictionary<string, MSBuildProjectSystem> projects)
+        {
+            List<string> libraries = new List<string>();
+
+            // collect files from solution
+            PackArgs packArgs = new PackArgs();
+            packArgs.Logger = Console;
+            // packArgs.OutputDirectory = OutputDirectory;
+            packArgs.BasePath = null;
+            packArgs.MsBuildDirectory = MsBuildUtility.GetMsbuildDirectoryFromMsbuildPath(null, null, Console);
+            packArgs.Build = false;
+            packArgs.Exclude = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            packArgs.ExcludeEmptyDirectories = false;
+            packArgs.IncludeReferencedProjects = false;
+            packArgs.LogLevel = NuGet.Common.LogLevel.Minimal;
+            packArgs.MinClientVersion = null;
+            packArgs.NoDefaultExcludes = false;
+            packArgs.NoPackageAnalysis = false;
+            packArgs.Suffix = null;
+            packArgs.Symbols = Symbols;
+            packArgs.Tool = false;
+            // TODO
+            packArgs.Version = Version;
+
+            NuModulePackageBuilder builder = new NuModulePackageBuilder(manifest, Console);
+            foreach (var project in projects.Values)
+            {
+                // TODO
+                packArgs.Arguments = new string[] { project.ProjectFileFullPath };
+                packArgs.Path = PackCommandRunner.GetInputFile(packArgs);
+                PackCommandRunner.SetupCurrentDirectory(packArgs);
+                var factory = ProjectFactory.ProjectCreator(packArgs, Path.GetFullPath(Path.Combine(packArgs.CurrentDirectory, packArgs.Path)));
+                factory.SetIncludeSymbols(packArgs.Symbols);
+                var nupkgbuilder = factory.CreateBuilder(packArgs.BasePath, new NuGetVersion(Version), packArgs.Suffix, true, null);
+
+                var libName = Path.GetFileNameWithoutExtension(project.ProjectName);
+                builder.AddFiles(libName, nupkgbuilder.Files);
+                libraries.Add(libName);
+            }
+
+            // collect files from repository
+            // TODO install package if not exists
+            var installPath = resolveInstallPath();
+            PackagePathResolver pathResolver = new PackagePathResolver(installPath);
+            foreach (var l in manifest.Libraries)
+            {
+                var libName = l.Id.Id;
+                if (libraries.Contains(libName))
                 {
-                    result.Add(new PackageIdentity(s.Id, s.Version));
+                    // 已经从Solution中找到
+                    continue;
+                }
+
+                var pkgPath = pathResolver.GetInstalledPath(l.Id);
+                if(!Directory.Exists(pkgPath))
+                {
+                    var msg = String.Format("Can not find Library {0}", l.Id.ToString());
+                    throw new Exception(msg);
+                }
+
+                var files = _findPackageFiles(pkgPath);
+                builder.AddFiles(libName, files);
+            }
+
+            builder.OutputDirectory = Path.Combine(OutputDirectory, manifest.Name);
+            builder.Symbols = Symbols;
+            return builder;
+        }
+
+        private ICollection<NuGet.Packaging.IPackageFile> _findPackageFiles(string root)
+        {
+            List<NuGet.Packaging.IPackageFile> result = new List<Packaging.IPackageFile>();
+            result.AddRange(this._findPackageFiles(root, "lib"));
+            result.AddRange(this._findPackageFiles(root, "build"));
+            result.AddRange(this._findPackageFiles(root, "content"));
+            return result;
+        }
+
+        private ICollection<NuGet.Packaging.IPackageFile> _findPackageFiles(string root, string folder)
+        {
+            List<NuGet.Packaging.IPackageFile> result = new List<Packaging.IPackageFile>();
+            var searchDir = Path.Combine(root, folder);
+            if(Directory.Exists(searchDir))
+            {
+                List<string> subFiles = new List<string>();
+                _collectPackageFiles(Path.Combine(root, folder), subFiles);
+                foreach (var subFile in subFiles)
+                {
+                    var targetPath = subFile.Substring(root.Length);
+                    if(targetPath.StartsWith("\\"))
+                    {
+                        if(targetPath.Length > 1)
+                        {
+                            targetPath = targetPath.Substring(1);
+                        }
+                        else
+                        {
+                            targetPath = null;
+                        }
+                    }
+                    if (String.IsNullOrEmpty(targetPath))
+                        continue;
+                    var file = new NuGet.Packaging.PhysicalPackageFile()
+                    {
+                        SourcePath = subFile,
+                        TargetPath = targetPath
+                    };
+                    result.Add(file);
                 }
             }
             return result;
         }
 
-        private void copyDirectory(string sPath, string dPath, bool force)
+        private void _collectPackageFiles(string root, ICollection<string> files)
         {
-            if (!Directory.Exists(sPath))
+            foreach(var subFile in Directory.GetFiles(root))
             {
-                Console.WriteWarning(String.Format("Can not find src directory {0}.\n", sPath));
-                return;
+                files.Add(subFile);
             }
-            if(force)
+            foreach(var subDir in Directory.GetDirectories(root))
             {
-                Directory.Delete(dPath, true);
-            }
-            Console.WriteLine(String.Format("Copying directory {0} to {1}", sPath, dPath));
-            string[] directories = System.IO.Directory.GetDirectories(sPath);
-            if (!System.IO.Directory.Exists(dPath))
-                System.IO.Directory.CreateDirectory(dPath);
-            System.IO.DirectoryInfo dir = new System.IO.DirectoryInfo(sPath);
-            System.IO.DirectoryInfo[] dirs = dir.GetDirectories();
-            FileInfo[] files = dir.GetFiles();
-            foreach (System.IO.DirectoryInfo subDirectoryInfo in dirs)
-            {
-                string sourceDirectoryFullName = subDirectoryInfo.FullName;
-                string destDirectoryFullName = sourceDirectoryFullName.Replace(sPath, dPath);
-                copyDirectory(sourceDirectoryFullName, destDirectoryFullName);
-            }
-            foreach (FileInfo file in files)
-            {
-                string sourceFileFullName = file.FullName;
-                string destFileFullName = sourceFileFullName.Replace(sPath, dPath);
-                Console.WriteLine(String.Format("Copying file {0} to {1}", Path.GetFileName(sourceFileFullName), destFileFullName));
-                file.CopyTo(destFileFullName, true);
-            }
-        }
-
-        private void copyDirectory(string sPath, string dPath)
-        {
-            copyDirectory(sPath, dPath, false);
-        }
-
-        private void CopyFile(System.IO.DirectoryInfo path, string desPath)
-        {
-            string sourcePath = path.FullName;
-            System.IO.FileInfo[] files = path.GetFiles();
-            foreach (System.IO.FileInfo file in files)
-            {
-                string sourceFileFullName = file.FullName;
-                string destFileFullName = sourceFileFullName.Replace(sourcePath, desPath);
-                file.CopyTo(destFileFullName, true);
+                _collectPackageFiles(subDir, files);
             }
         }
     }
