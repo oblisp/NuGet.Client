@@ -83,6 +83,10 @@ namespace NuGet.Extension.Commands
             string pkgName = transformPackageName(ps, fileName);
             manifest.Metadata.Id = pkgName;
             manifest.Metadata.Version = "$version$";
+            if (!String.IsNullOrEmpty(DefaultPackageVersion))
+            {
+                manifest.Metadata.Version = DefaultPackageVersion;
+            }
             manifest.Metadata.Description = pkgName;
             manifest.Metadata.Authors = "PKU-HIT";
             manifest.Metadata.Tags = "IIH";
