@@ -71,6 +71,10 @@ namespace NuGet.Extension.Commands
             {
                 handlePackCmd();
             }
+            else if("clean".Equals(subCmd))
+            {
+                _handleCleanCmd();
+            }
             else
             {
                 var message = String.Format("Unknown sub command {0}", subCmd);
@@ -160,6 +164,33 @@ namespace NuGet.Extension.Commands
 
             var builder = createNuModulePackageBuilder(manifest, projects);
             builder.Build();
+        }
+
+        private void _handleCleanCmd()
+        {
+            var modulePath = Path.Combine(OutputDirectory, Id);
+            if(!Directory.Exists(modulePath))
+            {
+                return;
+            }
+            NuModuleManifest manifest = new NuModuleManifest(Id, Version);
+            foreach(var subFile in Directory.GetFiles(modulePath))
+            {
+                if (subFile.EndsWith(".nuspec") || subFile.EndsWith(".nupkg"))
+                {
+                    Console.WriteLine("Deleting file {0}", subFile);
+                    File.Delete(subFile);
+                }
+            }
+            var subDirs = new string[] { Path.Combine(modulePath, "lib"), Path.Combine(modulePath, "runtime"), Path.Combine(modulePath, "src") };
+            foreach(var subDir in subDirs)
+            {
+                if(Directory.Exists(subDir))
+                {
+                    Console.WriteLine("Deleting directory {0}", subDir);
+                    Directory.Delete(subDir, true);
+                }
+            }
         }
 
         private string resolveInstallPath()
