@@ -121,7 +121,7 @@ namespace NuGet.Extension.Common
 
             PKG_MAPPINGS.Add("websocket-sharp", PKG_WEBSOCKET);
 
-            PKG_MAPPINGS.Add("DCSoft.Writer", new PackageContent(new PackageIdentity("IIH.DCSoft.Writer", new Versioning.NuGetVersion("1.0.0"))));
+            PKG_MAPPINGS.Add("DCSoft.Writer", new PackageContent(new PackageIdentity("DCSoft.Writer", new Versioning.NuGetVersion("1.2015.12.23"))));
 
             PKG_MAPPINGS.Add("zxing", PKG_ZXING);
 
